@@ -1,0 +1,34 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  background: #F4F5F2;
+  color: #0F1A2A;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+::selection { background: rgba(31,95,122,.18); }
+
+/* numeric columns align */
+.mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+@keyframes paStamp { 0% { opacity: 0; transform: scale(.955); } 60% { opacity: 1; } 100% { opacity: 1; transform: scale(1); } }
+@keyframes paRise  { 0% { opacity: 0; transform: translateY(7px); } 100% { opacity: 1; transform: translateY(0); } }
+@keyframes paPulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* hover states (dc comp used style-hover) */
+.btn-dark { transition: background .14s ease; }
+.btn-dark:hover { background: #1C2A3D !important; }
+.btn-ghost { transition: background .14s ease; }
+.btn-ghost:hover { background: #FAFAF8 !important; }
+.row-hover { transition: background .12s ease; }
+.row-hover:hover { background: #FAFAF8 !important; }
+.card-upload { transition: box-shadow .14s ease; }
+.card-upload:hover { box-shadow: 0 4px 14px rgba(31,95,122,.14) !important; }
+
+button { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
