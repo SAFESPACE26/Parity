@@ -27,3 +27,5 @@ next-env.d.ts
 
 # generated design-comp runtime bundle (rebuilt from dc-runtime/src)
 support.js
+.vercel
+.env*
