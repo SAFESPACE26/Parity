@@ -2,6 +2,8 @@ import Link from "next/link";
 import { c, font } from "@/lib/tokens";
 import sql from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 type Verdict = "CERTIFIED" | "NOT_CERTIFIED";
 
 const grid = "1.6fr 1.2fr 1fr 0.9fr 0.9fr";
