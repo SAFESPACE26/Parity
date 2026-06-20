@@ -28,6 +28,7 @@
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "dotenv-cli": "^11.0.0",
+    "playwright": "^1.61.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.3"
   }

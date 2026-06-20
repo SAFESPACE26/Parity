@@ -5,18 +5,17 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { c, font } from "@/lib/tokens";
 
-const RUN_HREF = "/runs/8f3a2c?running=1";
-
 type Slot = { files: File[]; lang: string };
 
 export default function NewVerification() {
   const router = useRouter();
   const [configOpen, setConfigOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [legacy, setLegacy] = useState<Slot>({ files: [], lang: "COBOL" });
   const [migrated, setMigrated] = useState<Slot>({ files: [], lang: "Python" });
 
-  // black-box I/O contract (v1): both programs read the same inputs, write the same output fields.
   const [inputSchema, setInputSchema] = useState("seq,principal,rate,term,gross,tax_rate");
   const [outputFields, setOutputFields] = useState("final_amount,net_pay");
   const [legacyCmd, setLegacyCmd] = useState("cobc -x -free -o legacy legacy.cbl && ./legacy");
@@ -24,11 +23,22 @@ export default function NewVerification() {
 
   const bothUploaded = legacy.files.length > 0 && migrated.files.length > 0;
 
-  // For this UI-only build, every Run routes to the seeded demo run.
-  const runBuiltIn = () => router.push(RUN_HREF);
-  const runUploaded = () => {
-    if (!bothUploaded) return;
-    router.push(RUN_HREF);
+  const startDemo = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { projectId } = await fetch("/api/projects/demo", { method: "POST" }).then((r) => r.json());
+      const { runId } = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      }).then((r) => r.json());
+      router.push(`/runs/${runId}?running=1`);
+    } catch {
+      setError("Could not start verification. Is the database reachable?");
+      setBusy(false);
+    }
   };
 
   return (
@@ -44,12 +54,20 @@ export default function NewVerification() {
         you can put your name on.
       </p>
 
+      {error && (
+        <div style={{ marginBottom: 16, padding: "12px 16px", background: "rgba(179,38,30,.06)", border: `1px solid rgba(179,38,30,.3)`, borderRadius: 6, fontFamily: font.mono, fontSize: 13, color: c.divergent }}>
+          {error}
+        </div>
+      )}
+
       {/* built-in example */}
-      <button onClick={runBuiltIn} className="card-upload" style={exampleCard}>
+      <button onClick={startDemo} disabled={busy} className="card-upload" style={{ ...exampleCard, opacity: busy ? 0.7 : 1 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontWeight: 600, fontSize: 16, color: c.ink }}>Use the built-in example</span>
+              <span style={{ fontWeight: 600, fontSize: 16, color: c.ink }}>
+                {busy ? "Starting…" : "Use the built-in example"}
+              </span>
               <span style={recoBadge}>Recommended</span>
             </div>
             <div style={{ fontSize: 13.5, color: c.muted, marginTop: 5 }}>
@@ -170,12 +188,12 @@ export default function NewVerification() {
 
       <div style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 14 }}>
         <button
-          onClick={bothUploaded ? runUploaded : runBuiltIn}
+          onClick={startDemo}
+          disabled={busy}
           className={bothUploaded ? "btn-dark" : undefined}
-          disabled={false}
-          style={{ ...runBtn, opacity: 1 }}
+          style={{ ...runBtn, opacity: busy ? 0.7 : 1 }}
         >
-          Run verification
+          {busy ? "Starting…" : "Run verification"}
         </button>
         <span style={{ fontSize: 13, color: c.muted }}>
           {bothUploaded
