@@ -24,11 +24,13 @@ async function migrate() {
     const password = await signer.getAuthToken();
 
     sql = postgres({ host, port, database, username, password, ssl: 'require', max: 1 });
-  } else if (process.env.DATABASE_URL) {
-    console.log('Using DATABASE_URL...');
-    sql = postgres(process.env.DATABASE_URL, { ssl: 'require', max: 1 });
   } else {
-    throw new Error('No database credentials found. Set AWS_ROLE_ARN + VERCEL_OIDC_TOKEN or DATABASE_URL.');
+    const url = process.env.DATABASE_URL
+      ?? process.env.POSTGRES_URL_NON_POOLING
+      ?? process.env.POSTGRES_URL;
+    if (!url) throw new Error('No database credentials. Set DATABASE_URL or AWS_ROLE_ARN + VERCEL_OIDC_TOKEN.');
+    console.log('Using direct connection URL...');
+    sql = postgres(url, { ssl: 'require', max: 1 });
   }
 
   const schema = readFileSync(join(process.cwd(), 'lib', 'schema.sql'), 'utf8');
