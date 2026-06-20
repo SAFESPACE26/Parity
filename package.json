@@ -8,12 +8,17 @@
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "dotenv -e .env.local -- npx tsx scripts/migrate.ts",
+    "pipeline:demo": "dotenv -e .env.local -- npx tsx engine/cli.ts",
     "worker": "dotenv -e .env.local -- npx tsx engine/worker.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
     "@aws-sdk/credential-providers": "^3.1072.0",
     "@aws-sdk/rds-signer": "^3.1072.0",
+    "csv-parse": "^7.0.0",
+    "csv-stringify": "^6.8.0",
     "next": "^16.2.9",
+    "openai": "^6.44.0",
     "postgres": "^3.4.9",
     "react": "19.0.0",
     "react-dom": "19.0.0"
@@ -23,6 +28,7 @@
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "dotenv-cli": "^11.0.0",
+    "playwright": "^1.61.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.3"
   }

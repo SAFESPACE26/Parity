@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { c, font } from "@/lib/tokens";
-import { projects, type Verdict } from "@/lib/mock";
+import sql from "@/lib/db";
+
+export const dynamic = "force-dynamic";
+
+type Verdict = "CERTIFIED" | "NOT_CERTIFIED";
 
 const grid = "1.6fr 1.2fr 1fr 0.9fr 0.9fr";
 
@@ -30,7 +34,42 @@ function pill(fg: string, bd: string, bg: string): React.CSSProperties {
   };
 }
 
-export default function Dashboard() {
+function formatDivergence(rate: string | null): string {
+  if (!rate) return "—";
+  const pct = parseFloat(rate) * 100;
+  return isNaN(pct) ? "—" : pct.toFixed(1) + "%";
+}
+
+function formatRelTime(ts: string | null): string {
+  if (!ts) return "—";
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 2) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return "Yesterday";
+  if (days < 30) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+export default async function Dashboard() {
+  const rows = await sql`
+    SELECT p.id, p.name, p.source_language, p.target_language,
+      r.id AS run_id, r.verdict, r.completed_at,
+      (SELECT ROUND(MAX(divergence_rate)::numeric, 4) FROM findings WHERE run_id = r.id) AS max_divergence_rate
+    FROM projects p
+    LEFT JOIN LATERAL (
+      SELECT id, verdict, completed_at
+      FROM verification_runs
+      WHERE project_id = p.id
+      ORDER BY created_at DESC
+      LIMIT 1
+    ) r ON true
+    ORDER BY p.created_at DESC
+  `;
+
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto", padding: "44px 32px 80px" }}>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24 }}>
@@ -61,10 +100,17 @@ export default function Dashboard() {
           <div style={{ textAlign: "right" }}>Last run</div>
         </div>
 
-        {projects.map((p, i) => {
-          const last = i === projects.length - 1;
-          const divColor =
-            p.verdict === "NOT_CERTIFIED" ? c.divergent : p.verdict === null ? c.muted2 : c.muted;
+        {rows.length === 0 && (
+          <div style={{ padding: "54px 24px", textAlign: "center", fontFamily: font.mono, fontSize: 14, color: c.muted }}>
+            No projects yet. <Link href="/verify/new" style={{ color: c.instrument }}>Start a verification →</Link>
+          </div>
+        )}
+
+        {rows.map((p, i) => {
+          const last = i === rows.length - 1;
+          const verdict = p.verdict as Verdict | null;
+          const divColor = verdict === "NOT_CERTIFIED" ? c.divergent : verdict === null ? c.muted2 : c.muted;
+          const pipeline = `${p.source_language} → ${p.target_language}`;
           const inner = (
             <div
               className="row-hover"
@@ -75,34 +121,26 @@ export default function Dashboard() {
                 padding: "18px 22px",
                 borderBottom: last ? "none" : `1px solid ${c.divider}`,
                 alignItems: "center",
-                cursor: p.runId ? "pointer" : "default",
+                cursor: p.run_id ? "pointer" : "default",
               }}
             >
               <div>
                 <div style={{ fontWeight: 600, fontSize: 15, color: c.ink }}>{p.name}</div>
-                <div style={{ fontSize: 12.5, color: c.muted, marginTop: 2 }}>{p.sub}</div>
               </div>
-              <div style={{ fontFamily: font.mono, fontSize: 13.5, color: c.inkSoft }}>{p.pipeline}</div>
+              <div style={{ fontFamily: font.mono, fontSize: 13.5, color: c.inkSoft }}>{pipeline}</div>
               <div>
-                <VerdictPill verdict={p.verdict} />
+                <VerdictPill verdict={verdict} />
               </div>
               <div style={{ textAlign: "right", fontFamily: font.mono, fontSize: 14, color: divColor }}>
-                {p.divergence}
+                {formatDivergence(p.max_divergence_rate)}
               </div>
-              <div
-                style={{
-                  textAlign: "right",
-                  fontFamily: font.mono,
-                  fontSize: 13,
-                  color: p.verdict === null ? c.muted2 : c.muted,
-                }}
-              >
-                {p.lastRun}
+              <div style={{ textAlign: "right", fontFamily: font.mono, fontSize: 13, color: verdict === null ? c.muted2 : c.muted }}>
+                {formatRelTime(p.completed_at)}
               </div>
             </div>
           );
-          return p.runId ? (
-            <Link key={p.id} href={`/runs/${p.runId}`}>
+          return p.run_id ? (
+            <Link key={p.id} href={`/runs/${p.run_id}`}>
               {inner}
             </Link>
           ) : (

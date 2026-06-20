@@ -6,7 +6,9 @@ function makePool() {
   const roleArn = process.env.AWS_ROLE_ARN;
   const oidcToken = process.env.VERCEL_OIDC_TOKEN;
 
-  if (roleArn && oidcToken) {
+  // Only use OIDC/IAM auth when actually running on Vercel (fresh token injected at runtime).
+  // A token pulled from .env.local is stale; fall through to DATABASE_URL for local dev.
+  if (roleArn && oidcToken && process.env.VERCEL) {
     const host = process.env.PGHOST!;
     const port = parseInt(process.env.PGPORT ?? '5432', 10);
     const database = process.env.PGDATABASE!;
@@ -26,8 +28,13 @@ function makePool() {
     });
   }
 
-  if (process.env.DATABASE_URL) {
-    return postgres(process.env.DATABASE_URL, {
+  // Prefer DATABASE_URL, then fall back to the Neon URL pulled by `vercel env pull`
+  const url = process.env.DATABASE_URL
+    ?? process.env.POSTGRES_URL_NON_POOLING
+    ?? process.env.POSTGRES_URL;
+
+  if (url) {
+    return postgres(url, {
       ssl: 'require',
       max: 10,
       idle_timeout: 30,
@@ -35,7 +42,7 @@ function makePool() {
     });
   }
 
-  throw new Error('No database credentials. Set AWS_ROLE_ARN + VERCEL_OIDC_TOKEN or DATABASE_URL.');
+  throw new Error('No database credentials. Set DATABASE_URL or AWS_ROLE_ARN + VERCEL_OIDC_TOKEN.');
 }
 
 const globalForPg = globalThis as unknown as { pg: ReturnType<typeof postgres> | undefined };
