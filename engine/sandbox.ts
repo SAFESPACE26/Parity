@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, cp, rm } from 'node:fs/promises';
+import { mkdtemp, cp, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,27 @@ export async function createSandbox(
 ): Promise<{ dir: string; cleanup: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), 'parity-'));
   for (const { src, dest } of files) {
+    await cp(src, join(dir, dest));
+  }
+  return {
+    dir,
+    cleanup: () => rm(dir, { recursive: true, force: true }),
+  };
+}
+
+// Copy every file in srcDir into a fresh sandbox, then add any extraFiles.
+export async function createSandboxFromDir(
+  srcDir: string,
+  extraFiles: { src: string; dest: string }[] = []
+): Promise<{ dir: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), 'parity-'));
+  const entries = await readdir(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile()) {
+      await cp(join(srcDir, entry.name), join(dir, entry.name));
+    }
+  }
+  for (const { src, dest } of extraFiles) {
     await cp(src, join(dir, dest));
   }
   return {
@@ -64,4 +85,15 @@ export function runCommand(
     });
     child.on('error', reject);
   });
+}
+
+// Run a user-supplied shell command string (may contain &&, pipes, etc.)
+export function runShellCommand(
+  dir: string,
+  cmd: string,
+  timeoutMs = 120_000
+): Promise<CommandResult> {
+  const isWindows = process.platform === 'win32';
+  const [shell, flag] = isWindows ? ['cmd', '/c'] : ['sh', '-c'];
+  return runCommand(dir, [shell, flag, cmd], timeoutMs);
 }

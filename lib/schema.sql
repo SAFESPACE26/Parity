@@ -1,20 +1,22 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TABLE projects (
-  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name            TEXT NOT NULL,
-  source_language TEXT NOT NULL,
-  target_language TEXT NOT NULL,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS projects (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                TEXT NOT NULL,
+  source_language     TEXT NOT NULL,
+  target_language     TEXT NOT NULL,
+  upload_dir          TEXT,
+  comparison_contract JSONB,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE modules (
+CREATE TABLE IF NOT EXISTS modules (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id  UUID NOT NULL REFERENCES projects(id),
   name        TEXT NOT NULL
 );
 
-CREATE TABLE verification_runs (
+CREATE TABLE IF NOT EXISTS verification_runs (
   id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id            UUID NOT NULL REFERENCES projects(id),
   status                TEXT NOT NULL DEFAULT 'queued',
@@ -28,29 +30,29 @@ CREATE TABLE verification_runs (
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE test_cases (
+CREATE TABLE IF NOT EXISTS test_cases (
   id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id  UUID NOT NULL REFERENCES verification_runs(id),
   seq     INTEGER NOT NULL,
   inputs  JSONB NOT NULL
 );
-CREATE INDEX ON test_cases (run_id, seq);
+CREATE INDEX IF NOT EXISTS test_cases_run_id_seq_idx ON test_cases (run_id, seq);
 
-CREATE TABLE legacy_runs (
+CREATE TABLE IF NOT EXISTS legacy_runs (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   test_case_id  UUID NOT NULL REFERENCES test_cases(id),
   outputs       JSONB NOT NULL,
   exec_ms       INTEGER
 );
 
-CREATE TABLE migrated_runs (
+CREATE TABLE IF NOT EXISTS migrated_runs (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   test_case_id  UUID NOT NULL REFERENCES test_cases(id),
   outputs       JSONB NOT NULL,
   exec_ms       INTEGER
 );
 
-CREATE TABLE field_diffs (
+CREATE TABLE IF NOT EXISTS field_diffs (
   id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id         UUID NOT NULL REFERENCES verification_runs(id),
   test_case_id   UUID NOT NULL REFERENCES test_cases(id),
@@ -61,10 +63,10 @@ CREATE TABLE field_diffs (
   is_match       BOOLEAN NOT NULL,
   delta          NUMERIC
 );
-CREATE INDEX ON field_diffs (run_id, is_match);
-CREATE INDEX ON field_diffs (run_id, field_name);
+CREATE INDEX IF NOT EXISTS field_diffs_run_id_is_match_idx ON field_diffs (run_id, is_match);
+CREATE INDEX IF NOT EXISTS field_diffs_run_id_field_name_idx ON field_diffs (run_id, field_name);
 
-CREATE TABLE findings (
+CREATE TABLE IF NOT EXISTS findings (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id          UUID NOT NULL REFERENCES verification_runs(id),
   module_id       UUID REFERENCES modules(id),
@@ -79,7 +81,7 @@ CREATE TABLE findings (
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE certifications (
+CREATE TABLE IF NOT EXISTS certifications (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id           UUID NOT NULL UNIQUE REFERENCES verification_runs(id),
   verdict          TEXT NOT NULL,
@@ -90,7 +92,7 @@ CREATE TABLE certifications (
   issued_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE agent_steps (
+CREATE TABLE IF NOT EXISTS agent_steps (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id     UUID NOT NULL REFERENCES verification_runs(id),
   seq        INTEGER NOT NULL,
@@ -99,9 +101,9 @@ CREATE TABLE agent_steps (
   detail     JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX ON agent_steps (run_id, seq);
+CREATE INDEX IF NOT EXISTS agent_steps_run_id_seq_idx ON agent_steps (run_id, seq);
 
-CREATE TABLE agent_queries (
+CREATE TABLE IF NOT EXISTS agent_queries (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   run_id        UUID REFERENCES verification_runs(id),
   step_id       UUID REFERENCES agent_steps(id),
@@ -111,4 +113,8 @@ CREATE TABLE agent_queries (
   result_sample JSONB,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX ON agent_queries (run_id, created_at);
+CREATE INDEX IF NOT EXISTS agent_queries_run_id_created_at_idx ON agent_queries (run_id, created_at);
+
+-- Backward-compat: add upload columns to existing projects tables
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS upload_dir TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS comparison_contract JSONB;

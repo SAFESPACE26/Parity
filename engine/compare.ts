@@ -2,10 +2,7 @@ import sql from '../lib/db.js';
 import type { TestCaseRecord } from './generate.js';
 import type { ProgramOutput } from './execute.js';
 
-const MONEY_FIELDS = new Set(['final_amount', 'net_pay']);
-
-function severity(fieldName: string, divergenceRate: number): string {
-  if (MONEY_FIELDS.has(fieldName) && divergenceRate > 0) return 'critical';
+function severity(divergenceRate: number): string {
   if (divergenceRate > 0.1) return 'critical';
   if (divergenceRate > 0.01) return 'high';
   if (divergenceRate > 0.001) return 'medium';
@@ -18,14 +15,14 @@ export async function compare(
   testCases: TestCaseRecord[],
   legacyOutputs: Map<number, ProgramOutput>,
   migratedOutputs: Map<number, ProgramOutput>,
-  moduleMap: Record<string, string>,   // fieldName → moduleId
+  moduleMap: Record<string, string>,
   tolerance = 0,
-  mask: string[] = []
+  mask: string[] = [],
+  outputFields: string[] = ['final_amount', 'net_pay']
 ): Promise<{ divergingInputCount: number; fieldsChecked: number }> {
-  const fields: string[] = ['final_amount', 'net_pay'];
   const maskSet = new Set(mask);
 
-  type AggKey = string; // `${fieldName}:${moduleId}`
+  type AggKey = string;
   const agg = new Map<AggKey, { divergingCount: number; totalCount: number; maxAbsDelta: number }>();
 
   const fieldDiffs: Array<{
@@ -46,9 +43,9 @@ export async function compare(
     const migratedOut = migratedOutputs.get(tc.seq);
     if (!legacyOut || !migratedOut) continue;
 
-    for (const field of fields) {
-      const legacyVal = legacyOut[field].trim();
-      const migratedVal = migratedOut[field].trim();
+    for (const field of outputFields) {
+      const legacyVal = (legacyOut[field] ?? '').trim();
+      const migratedVal = (migratedOut[field] ?? '').trim();
       const moduleId = moduleMap[field] ?? null;
       const aggKey: AggKey = `${field}:${moduleId ?? 'null'}`;
 
@@ -88,7 +85,6 @@ export async function compare(
     }
   }
 
-  // Bulk insert field_diffs
   const BATCH = 1000;
   for (let i = 0; i < fieldDiffs.length; i += BATCH) {
     await sql`
@@ -100,7 +96,6 @@ export async function compare(
     `;
   }
 
-  // Insert findings for diverging fields
   const findingRows = Array.from(agg.entries())
     .filter(([, v]) => v.divergingCount > 0)
     .map(([key, v]) => {
@@ -116,7 +111,7 @@ export async function compare(
         total_count: v.totalCount,
         divergence_rate: divergenceRate,
         max_abs_delta: v.maxAbsDelta,
-        severity: severity(fieldName, divergenceRate),
+        severity: severity(divergenceRate),
       };
     });
 

@@ -23,6 +23,34 @@ export default function NewVerification() {
 
   const bothUploaded = legacy.files.length > 0 && migrated.files.length > 0;
 
+  const startUpload = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append('name', `${legacy.lang} → ${migrated.lang} Migration`);
+      formData.append('sourceLanguage', legacy.lang);
+      formData.append('targetLanguage', migrated.lang);
+      formData.append('legacyCmd', legacyCmd);
+      formData.append('migratedCmd', migratedCmd);
+      formData.append('outputFields', outputFields);
+      for (const file of legacy.files) formData.append('legacyFiles', file);
+      for (const file of migrated.files) formData.append('migratedFiles', file);
+
+      const { projectId } = await fetch('/api/projects', { method: 'POST', body: formData }).then((r) => r.json());
+      const { runId } = await fetch('/api/runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      }).then((r) => r.json());
+      router.push(`/runs/${runId}?running=1`);
+    } catch {
+      setError('Could not start verification. Check that the files and commands are correct.');
+      setBusy(false);
+    }
+  };
+
   const startDemo = async () => {
     if (busy) return;
     setBusy(true);
@@ -188,7 +216,7 @@ export default function NewVerification() {
 
       <div style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 14 }}>
         <button
-          onClick={startDemo}
+          onClick={bothUploaded ? startUpload : startDemo}
           disabled={busy}
           className={bothUploaded ? "btn-dark" : undefined}
           style={{ ...runBtn, opacity: busy ? 0.7 : 1 }}
