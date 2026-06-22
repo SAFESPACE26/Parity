@@ -1,14 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import sql from '../lib/db.js';
 import { generate } from './generate.js';
 import { executePrograms } from './execute.js';
 import { compare } from './compare.js';
 import { explain } from './explain.js';
+import type { UploadConfig } from './execute.js';
 
 export interface PipelineConfig {
-  fixturesDir: string;
+  fixturesDir?: string;    // demo mode: dir containing legacy.cbl + migrated.py
+  uploadConfig?: UploadConfig; // upload mode: user files + custom commands
   inputCount?: number;
   tolerance?: number;
   mask?: string[];
@@ -26,7 +28,7 @@ export async function runPipeline(
   projectId: string,
   config: PipelineConfig
 ): Promise<PipelineResult> {
-  const { fixturesDir, inputCount = 10000, tolerance = 0, mask = [] } = config;
+  const { fixturesDir, uploadConfig, inputCount = 10000, tolerance = 0, mask = [] } = config;
 
   await sql`
     UPDATE verification_runs
@@ -34,7 +36,7 @@ export async function runPipeline(
     WHERE id = ${runId}
   `;
 
-  // Resolve module IDs for field → module mapping
+  // Module map: fieldName → moduleId (demo only; upload projects have no modules)
   const modules = await sql<{ id: string; name: string }[]>`
     SELECT id, name FROM modules WHERE project_id = ${projectId}
   `;
@@ -44,7 +46,6 @@ export async function runPipeline(
     if (m.name === 'payroll') moduleMap['net_pay'] = m.id;
   }
 
-  // Resolve project languages for the LLM explain prompt
   const [project] = await sql<{ source_language: string; target_language: string }[]>`
     SELECT source_language, target_language FROM projects WHERE id = ${projectId}
   `;
@@ -53,24 +54,19 @@ export async function runPipeline(
 
   const tempDir = await mkdtemp(join(tmpdir(), 'parity-inputs-'));
   try {
-    // Stage 1 — generate inputs
     const { testCases, inputsPath } = await generate(runId, tempDir, inputCount);
     await sql`UPDATE verification_runs SET input_count = ${testCases.length} WHERE id = ${runId}`;
 
-    // Stages 2–3 — execute legacy (oracle) + migrated
-    const { legacyOutputs, migratedOutputs } = await executePrograms(
-      runId, testCases, inputsPath, fixturesDir
+    const { legacyOutputs, migratedOutputs, outputFields } = await executePrograms(
+      runId, testCases, inputsPath, fixturesDir ?? '', uploadConfig
     );
 
-    // Stages 4–5 — compare + localize
     const { divergingInputCount, fieldsChecked } = await compare(
-      runId, testCases, legacyOutputs, migratedOutputs, moduleMap, tolerance, mask
+      runId, testCases, legacyOutputs, migratedOutputs, moduleMap, tolerance, mask, outputFields
     );
 
-    // Stage 6 — explain (LLM per finding)
     await explain(runId, srcLang, tgtLang);
 
-    // Stage 7 — certify
     const findings = await sql`SELECT * FROM findings WHERE run_id = ${runId}`;
     const findingCount = findings.length;
     const verdict: 'CERTIFIED' | 'NOT_CERTIFIED' = findingCount > 0 ? 'NOT_CERTIFIED' : 'CERTIFIED';
