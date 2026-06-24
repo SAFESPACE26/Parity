@@ -7,10 +7,20 @@ import { join } from 'node:path';
 async function migrate() {
   let sql: ReturnType<typeof postgres>;
 
-  const roleArn = process.env.AWS_ROLE_ARN;
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+  // Prefer DATABASE_URL (the unified Aurora connection used by app + worker); only
+  // fall back to Aurora IAM/OIDC when no URL is set.
+  const url = process.env.DATABASE_URL
+    ?? process.env.POSTGRES_URL_NON_POOLING
+    ?? process.env.POSTGRES_URL;
 
-  if (roleArn && oidcToken) {
+  if (url) {
+    console.log('Using direct connection URL...');
+    const localHost = /@(localhost|127\.0\.0\.1|db|postgres)[:/]/.test(url) || /sslmode=disable/.test(url);
+    sql = postgres(url, { ssl: localHost ? false : 'require', max: 1 });
+  } else {
+    const roleArn = process.env.AWS_ROLE_ARN;
+    const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+    if (!roleArn || !oidcToken) throw new Error('No database credentials. Set DATABASE_URL or AWS_ROLE_ARN + VERCEL_OIDC_TOKEN.');
     // Aurora IAM auth via OIDC web identity
     console.log('Using Aurora IAM auth...');
     const host = process.env.PGHOST!;
@@ -24,13 +34,6 @@ async function migrate() {
     const password = await signer.getAuthToken();
 
     sql = postgres({ host, port, database, username, password, ssl: 'require', max: 1 });
-  } else {
-    const url = process.env.DATABASE_URL
-      ?? process.env.POSTGRES_URL_NON_POOLING
-      ?? process.env.POSTGRES_URL;
-    if (!url) throw new Error('No database credentials. Set DATABASE_URL or AWS_ROLE_ARN + VERCEL_OIDC_TOKEN.');
-    console.log('Using direct connection URL...');
-    sql = postgres(url, { ssl: 'require', max: 1 });
   }
 
   const schema = readFileSync(join(process.cwd(), 'lib', 'schema.sql'), 'utf8');

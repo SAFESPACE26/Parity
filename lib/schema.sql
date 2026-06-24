@@ -118,3 +118,6 @@ CREATE INDEX IF NOT EXISTS agent_queries_run_id_created_at_idx ON agent_queries 
 -- Backward-compat: add upload columns to existing projects tables
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS upload_dir TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS comparison_contract JSONB;
+
+-- Live pipeline progress: current stage key the worker is executing
+ALTER TABLE verification_runs ADD COLUMN IF NOT EXISTS stage TEXT;
