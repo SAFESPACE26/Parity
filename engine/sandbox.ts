@@ -158,11 +158,24 @@ export function runCommand(
   return execHardened(dir, rawCmd, timeoutMs);
 }
 
+// User commands are written POSIX-style (`./legacy`, `python3 …`) but on Windows
+// they run through cmd.exe, where `./legacy` errors with `'.' is not recognized`
+// and `python3` does not exist. Translate the common idioms so a contract saved
+// on any platform runs here. Leaves the command untouched on POSIX.
+function normalizeForWindows(cmd: string): string {
+  if (process.platform !== 'win32') return cmd;
+  return cmd
+    // strip a leading ./ or .\ on any token (cmd searches the cwd already)
+    .replace(/(^|[\s&|(])\.[\\/](?=\S)/g, '$1')
+    // python3 → python (only as a standalone command token)
+    .replace(/(^|[\s&|(])python3(?=\s|$)/g, '$1python');
+}
+
 // Run a user-supplied shell command string (may contain &&, pipes, etc.) — untrusted.
 export function runShellCommand(
   dir: string,
   cmd: string,
   timeoutMs = 120_000
 ): Promise<CommandResult> {
-  return execHardened(dir, cmd, timeoutMs);
+  return execHardened(dir, normalizeForWindows(cmd), timeoutMs);
 }
