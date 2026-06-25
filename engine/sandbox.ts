@@ -89,6 +89,14 @@ function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
+// cmd.exe does not understand POSIX single-quotes (`'cobc'` becomes an unknown
+// command). Leave plain tokens untouched; only double-quote args with spaces or
+// cmd-special chars, doubling any embedded quote.
+function cmdQuote(arg: string): string {
+  if (/^[A-Za-z0-9_.:\\/=+-]+$/.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '""')}"`;
+}
+
 // POSIX: apply ulimits in the same shell before exec'ing the command. Optionally
 // drop network via `unshare -n` when PARITY_SANDBOX_UNSHARE=1 and it is available.
 function buildPosixCommand(rawCmd: string): string {
@@ -154,7 +162,8 @@ export function runCommand(
   cmd: string[],
   timeoutMs = 120_000
 ): Promise<CommandResult> {
-  const rawCmd = cmd.map(shellQuote).join(' ');
+  const quote = process.platform === 'win32' ? cmdQuote : shellQuote;
+  const rawCmd = cmd.map(quote).join(' ');
   return execHardened(dir, rawCmd, timeoutMs);
 }
 
