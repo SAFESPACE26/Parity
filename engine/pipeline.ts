@@ -30,9 +30,14 @@ export async function runPipeline(
 ): Promise<PipelineResult> {
   const { fixturesDir, uploadConfig, inputCount = 10000, tolerance = 0, mask = [] } = config;
 
+  // Live progress: the worker stamps the current stage so the UI can show real
+  // pipeline state instead of a generic spinner.
+  const setStage = (stage: string) =>
+    sql`UPDATE verification_runs SET stage = ${stage} WHERE id = ${runId}`;
+
   await sql`
     UPDATE verification_runs
-    SET status = 'running', started_at = now()
+    SET status = 'running', started_at = now(), stage = 'generate'
     WHERE id = ${runId}
   `;
 
@@ -57,15 +62,20 @@ export async function runPipeline(
     const { testCases, inputsPath } = await generate(runId, tempDir, inputCount);
     await sql`UPDATE verification_runs SET input_count = ${testCases.length} WHERE id = ${runId}`;
 
+    await setStage('execute');
     const { legacyOutputs, migratedOutputs, outputFields } = await executePrograms(
       runId, testCases, inputsPath, fixturesDir ?? '', uploadConfig
     );
 
+    await setStage('compare');
     const { divergingInputCount, fieldsChecked } = await compare(
       runId, testCases, legacyOutputs, migratedOutputs, moduleMap, tolerance, mask, outputFields
     );
 
+    await setStage('explain');
     await explain(runId, srcLang, tgtLang);
+
+    await setStage('certify');
 
     const findings = await sql`SELECT * FROM findings WHERE run_id = ${runId}`;
     const findingCount = findings.length;
@@ -92,7 +102,7 @@ export async function runPipeline(
 
     await sql`
       UPDATE verification_runs
-      SET status = 'completed', verdict = ${verdict}, completed_at = now()
+      SET status = 'completed', verdict = ${verdict}, completed_at = now(), stage = 'done'
       WHERE id = ${runId}
     `;
 

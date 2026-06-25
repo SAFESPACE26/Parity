@@ -18,8 +18,8 @@ export default function NewVerification() {
 
   const [inputSchema, setInputSchema] = useState("seq,principal,rate,term,gross,tax_rate");
   const [outputFields, setOutputFields] = useState("final_amount,net_pay");
-  const [legacyCmd, setLegacyCmd] = useState("cobc -x -free -o legacy legacy.cbl && legacy");
-  const [migratedCmd, setMigratedCmd] = useState("python migrated.py inputs.csv migrated_outputs.csv");
+  const [legacyCmd, setLegacyCmd] = useState("cobc -x -free -o legacy legacy.cbl && ./legacy");
+  const [migratedCmd, setMigratedCmd] = useState("python3 migrated.py inputs.csv migrated_outputs.csv");
 
   const bothUploaded = legacy.files.length > 0 && migrated.files.length > 0;
 

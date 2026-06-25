@@ -1,16 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { c, font } from "@/lib/tokens";
-import { trajectory, styleStep, suggestedFix } from "@/lib/mock";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type RunInfo = {
   id: string;
   project_id: string;
   status: "queued" | "running" | "completed" | "failed";
+  stage: string | null;
   verdict: string | null;
   created_at: string;
   completed_at: string | null;
@@ -79,7 +79,6 @@ type ReportData = {
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-const fmt = (n: number) => Math.round(n).toLocaleString("en-US");
 
 function fmtMoney(v: string): string {
   const n = parseFloat(v);
@@ -121,48 +120,17 @@ export default function RunPage() {
 }
 
 // ── RunView: state machine ────────────────────────────────────────────────────
-type Phase = "theater" | "waiting" | "report" | "error";
+type Phase = "waiting" | "report" | "error";
 
 function RunView() {
   const params = useParams<{ id: string }>();
-  const search = useSearchParams();
   const router = useRouter();
   const id = params.id;
-  const wantRunning = search.get("running") === "1";
 
-  const [phase, setPhase] = useState<Phase>(wantRunning ? "theater" : "waiting");
-  const [t, setT] = useState(wantRunning ? 0 : 1);
+  const [phase, setPhase] = useState<Phase>("waiting");
   const [stamped, setStamped] = useState(false);
   const [runData, setRunData] = useState<RunInfo | null>(null);
   const [reportData, setReportData] = useState<ReportData | null>(null);
-
-  // When theater ends, transition to waiting (continue poll)
-  const onTheaterDone = () => setPhase("waiting");
-
-  // Theater animation
-  useEffect(() => {
-    if (phase !== "theater") return;
-    const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) {
-      setT(1);
-      const a = setTimeout(onTheaterDone, 200);
-      return () => clearTimeout(a);
-    }
-    const start = Date.now();
-    const dur = 5200;
-    const timer = setInterval(() => {
-      let nt = (Date.now() - start) / dur;
-      if (nt >= 1) {
-        clearInterval(timer);
-        setT(1);
-        setTimeout(onTheaterDone, 420);
-      } else {
-        setT(nt);
-      }
-    }, 40);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
 
   // Load all report sub-data after a run completes
   const loadReport = useCallback(
@@ -213,164 +181,59 @@ function RunView() {
     return () => clearInterval(pollRef.current!);
   }, [phase, id, loadReport]);
 
-  if (phase === "theater") return <Verifying id={id} t={t} />;
   if (phase === "waiting") return <WaitingView id={id} runData={runData} />;
   if (phase === "error") return <ErrorView id={id} error={runData?.error ?? null} />;
   if (!reportData || !runData) return null;
   return <Report id={id} runData={runData} reportData={reportData} stamped={stamped} router={router} />;
 }
 
-// ── Verifying (investigation theater) ─────────────────────────────────────────
-function Verifying({ id, t }: { id: string; t: number }) {
-  const traj = trajectory(false);
-  const n = traj.length;
-  const trajRows = traj
-    .map((s, i) => ({ ...styleStep(s), r: ((i + 0.6) / n) * 0.84 }))
-    .filter((r) => t >= r.r || t >= 1);
-  const investDone = t >= 1;
-  const probesStr = fmt(Math.min(1, t / 0.84) * 412);
-  const comparesStr = fmt(Math.min(1, t) * 20000);
-  const divFoundN = Math.max(0, Math.min(1, (t - 0.34) / 0.66)) * 312;
-  const riskRows = [
-    { name: "interest_calc", sub: "compounding loop · monetary rounding", level: "High", barPct: 88, focus: t >= 0.08 && t < 0.72 },
-    { name: "payroll", sub: "tax withholding", level: "Medium", barPct: 46, focus: t >= 0.72 },
-  ].map((r) => ({
-    ...r,
-    ring: r.focus ? c.instrument : c.track,
-    focusLabel: r.focus ? "Focusing" : "Queued",
-    focusColor: r.focus ? c.instrument : c.muted2,
-  }));
-
-  return (
-    <div style={{ maxWidth: 1040, margin: "0 auto", padding: "40px 32px 80px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.instrument, boxShadow: "0 0 0 4px rgba(31,95,122,.13)" }} />
-        <div style={{ fontWeight: 600, fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: c.instrument }}>
-          Investigating
-        </div>
-      </div>
-      <h1 style={{ fontFamily: font.serif, fontWeight: 500, fontSize: 28, lineHeight: "34px", color: c.ink, margin: "7px 0 2px" }}>
-        COBOL Interest &amp; Payroll
-      </h1>
-      <div style={{ fontFamily: font.mono, fontSize: 13, color: c.muted }}>
-        run_{id} · agent hunting for divergences · COBOL → Python
-      </div>
-
-      <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 22, flexWrap: "wrap", fontSize: 12.5, color: c.muted }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 9, height: 9, borderRadius: "50%", background: c.instrument }} />
-          <span><b style={{ color: c.instrument, fontWeight: 600 }}>Investigator</b> — reasons &amp; probes, provisional</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: c.ink }} />
-          <span><b style={{ color: c.ink, fontWeight: 600 }}>Oracle ruling</b> — deterministic, authoritative</span>
-        </div>
-      </div>
-
-      <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1.62fr 1fr", gap: 16, alignItems: "start" }}>
-        <div style={panel}>
-          <div style={{ ...panelHead, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontWeight: 600, fontSize: 13, color: c.ink }}>Agent trajectory</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 7, fontFamily: font.mono, fontSize: 11, color: c.instrument }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: c.instrument, animation: "paPulse 1.1s ease-in-out infinite" }} />
-              live
-            </span>
-          </div>
-          <div style={{ padding: "6px 18px 14px" }}>
-            {trajRows.map((s, i) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "54px 1fr", gap: 12, padding: "12px 0", borderBottom: `1px solid ${c.divider2}`, animation: "paRise 260ms ease both" }}>
-                <div style={{ fontFamily: font.mono, fontSize: 11, color: c.muted2, paddingTop: 2 }}>{s.at}</div>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: s.markerRadius, background: s.markerColor, flex: "none" }} />
-                    <span style={{ fontFamily: font.mono, fontSize: 10, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: s.chipColor, background: s.chipBg, borderRadius: 3, padding: "2px 7px" }}>
-                      {s.chip}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 13.5, lineHeight: "21px", color: s.textColor, fontWeight: s.textWeight as number, marginTop: 7 }}>
-                    {s.text}
-                  </div>
-                  {s.hasDetail && (
-                    <div style={{ fontFamily: font.mono, fontSize: 12, color: c.muted, marginTop: 4 }}>{s.detail}</div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {investDone && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 14, padding: "13px 15px", background: c.ink, borderRadius: 6, animation: "paRise 300ms ease both" }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.accentLt, flex: "none" }} />
-                <span style={{ fontSize: 13, lineHeight: "20px", color: c.sealText }}>
-                  Investigation complete — handing the proven divergence to the oracle for ruling.
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={panel}>
-            <div style={panelHead}>Risk map <span style={{ fontWeight: 400, color: c.muted, fontSize: 12 }}>· legacy surface</span></div>
-            <div style={{ padding: "14px 18px", display: "flex", flexDirection: "column", gap: 14 }}>
-              {riskRows.map((m) => (
-                <div key={m.name} style={{ border: `1px solid ${m.ring}`, borderRadius: 6, padding: "12px 13px", transition: "border-color .2s ease" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontFamily: font.mono, fontSize: 13, fontWeight: 500, color: c.ink }}>{m.name}</span>
-                    <span style={{ fontFamily: font.mono, fontSize: 10, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: m.focusColor }}>{m.focusLabel}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: c.muted, marginTop: 3 }}>{m.sub}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
-                    <div style={{ flex: 1, height: 5, background: c.divider, borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ height: "100%", borderRadius: 3, background: c.amber, width: `${m.barPct}%` }} />
-                    </div>
-                    <span style={{ fontFamily: font.mono, fontSize: 11, color: c.amber }}>{m.level}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ ...panel, padding: "14px 18px" }}>
-            <div style={{ fontWeight: 600, fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: c.muted, marginBottom: 12 }}>
-              Deterministic ledger
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-              <Counter label="Probes executed" value={probesStr} />
-              <Counter label="Comparisons" value={comparesStr} />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: `1px solid ${c.divider}`, paddingTop: 11 }}>
-                <span style={{ fontSize: 12.5, color: c.inkSoft }}>Divergences found</span>
-                <span style={{ fontFamily: font.mono, fontSize: 15, fontWeight: 600, color: divFoundN >= 1 ? c.divergent : c.muted2 }}>
-                  {fmt(divFoundN)}
-                </span>
-              </div>
-            </div>
-            <div style={{ fontSize: 11.5, lineHeight: "17px", color: c.muted2, marginTop: 13 }}>
-              The oracle rules every comparison — the agent never decides a match.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Waiting for the pipeline ──────────────────────────────────────────────────
+// Real stage telemetry — the worker stamps verification_runs.stage per phase.
+const PIPELINE_STAGES: { key: string; label: string }[] = [
+  { key: "generate", label: "Generate inputs" },
+  { key: "execute", label: "Execute legacy + migrated" },
+  { key: "compare", label: "Compare & localize" },
+  { key: "explain", label: "Explain divergences" },
+  { key: "certify", label: "Issue verdict" },
+];
+
 function WaitingView({ id, runData }: { id: string; runData: RunInfo | null }) {
   const status = runData?.status ?? "queued";
+  const stage = runData?.stage ?? null;
+  const currentIdx = stage ? PIPELINE_STAGES.findIndex((s) => s.key === stage) : -1;
+  const inputCount = runData?.input_count ? runData.input_count.toLocaleString("en-US") : null;
+
   return (
-    <div style={{ maxWidth: 1040, margin: "0 auto", padding: "80px 32px", textAlign: "center" }}>
-      <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+    <div style={{ maxWidth: 620, margin: "0 auto", padding: "72px 32px" }}>
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
         <span style={{ width: 10, height: 10, borderRadius: "50%", background: c.instrument, boxShadow: "0 0 0 4px rgba(31,95,122,.13)", animation: "paPulse 1.1s ease-in-out infinite" }} />
         <span style={{ fontFamily: font.mono, fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: c.instrument }}>
           {status === "queued" ? "Queued — waiting for worker" : "Pipeline running"}
         </span>
       </div>
-      <div style={{ fontFamily: font.serif, fontSize: 24, color: c.ink, marginBottom: 8 }}>Verification in progress</div>
-      <div style={{ fontSize: 14, lineHeight: "22px", color: c.muted, maxWidth: 480, margin: "0 auto 24px" }}>
-        run_{id} · The worker is processing {status === "queued" ? "the queued job" : "7 pipeline stages"}.
-        {" "}Results appear automatically when complete.
+      <div style={{ fontFamily: font.serif, fontSize: 24, color: c.ink, marginBottom: 4 }}>Verification in progress</div>
+      <div style={{ fontFamily: font.mono, fontSize: 12.5, color: c.muted, marginBottom: 24 }}>
+        run_{id}{inputCount ? ` · ${inputCount} inputs` : ""}
       </div>
-      <div style={{ fontFamily: font.mono, fontSize: 12, color: c.muted2 }}>
-        Make sure <code style={{ background: c.raised, padding: "2px 6px", borderRadius: 3, border: `1px solid ${c.divider}` }}>npm run worker</code> is running in a separate terminal.
+
+      <div style={{ ...panel, padding: "8px 0" }}>
+        {PIPELINE_STAGES.map((s, i) => {
+          const done = currentIdx > i || status === "completed";
+          const active = currentIdx === i && status !== "completed";
+          const color = done ? c.verified : active ? c.instrument : c.muted2;
+          return (
+            <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 13, padding: "12px 20px", borderTop: i === 0 ? "none" : `1px solid ${c.divider}` }}>
+              <span style={{ flex: "none", width: 18, height: 18, borderRadius: "50%", border: `2px solid ${color}`, background: done ? c.verified : "transparent", display: "flex", alignItems: "center", justifyContent: "center", color: c.surface, fontSize: 11, fontFamily: font.mono }}>
+                {done ? "✓" : active ? <span style={{ width: 6, height: 6, borderRadius: "50%", background: c.instrument, animation: "paPulse 1.1s ease-in-out infinite" }} /> : ""}
+              </span>
+              <span style={{ fontFamily: font.sans, fontSize: 14, color: done ? c.inkSoft : active ? c.ink : c.muted, fontWeight: active ? 600 : 400 }}>{s.label}</span>
+              {active && <span style={{ marginLeft: "auto", fontFamily: font.mono, fontSize: 11, color: c.instrument, textTransform: "uppercase", letterSpacing: ".05em" }}>running</span>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 12.5, color: c.muted2, marginTop: 16, textAlign: "center" }}>
+        Stages reported live from the worker. Results appear automatically when complete.
       </div>
     </div>
   );
@@ -384,6 +247,65 @@ function ErrorView({ id, error }: { id: string; error: string | null }) {
       <div style={{ fontFamily: font.serif, fontSize: 24, color: c.ink, marginBottom: 8 }}>run_{id}</div>
       {error && <div style={{ fontFamily: font.mono, fontSize: 12, color: c.muted, marginBottom: 16 }}>{error}</div>}
       <Link href="/projects" style={{ fontFamily: font.sans, fontSize: 13, color: c.instrument }}>← Back to projects</Link>
+    </div>
+  );
+}
+
+// ── Certified celebration ─────────────────────────────────────────────────────
+// One orchestrated moment when a migration is CERTIFIED: a brief ribbon burst in
+// the forensic-ledger greens. Auto-hidden under prefers-reduced-motion (CSS).
+function CertifiedCelebration() {
+  const COLORS = [c.verified, c.verifiedLt, "#7BC4A4", c.amber, c.paper];
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: 48 }, (_, i) => {
+        // deterministic-ish spread so SSR/client agree well enough for a one-shot overlay
+        const rnd = (n: number) => ((Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1 + 1) % 1;
+        return {
+          left: rnd(1) * 100,
+          drift: (rnd(2) - 0.5) * 220,
+          rot: 360 + rnd(3) * 540,
+          dur: 2.4 + rnd(4) * 1.3,
+          delay: rnd(5) * 0.5,
+          w: 6 + rnd(6) * 5,
+          h: 10 + rnd(7) * 12,
+          color: COLORS[Math.floor(rnd(8) * COLORS.length)],
+          ribbon: rnd(9) > 0.5,
+        };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const [gone, setGone] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setGone(true), 4200);
+    return () => clearTimeout(t);
+  }, []);
+  if (gone) return null;
+  return (
+    <div
+      className="pa-confetti-layer"
+      aria-hidden
+      style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 60, overflow: "hidden" }}
+    >
+      {pieces.map((p, i) => (
+        <span
+          key={i}
+          style={{
+            position: "absolute",
+            top: -24,
+            left: `${p.left}%`,
+            width: p.w,
+            height: p.h,
+            background: p.color,
+            borderRadius: p.ribbon ? 1 : 2,
+            opacity: 0,
+            ["--x" as string]: `${p.drift}px`,
+            ["--r" as string]: `${p.rot}deg`,
+            animation: `paConfetti ${p.dur}s cubic-bezier(.25,.6,.4,1) ${p.delay}s forwards`,
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -421,6 +343,7 @@ function Report({
 
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto", padding: "36px 32px 80px" }}>
+      {certified && stamped && <CertifiedCelebration />}
       <Link href="/projects" style={backLink}>← Projects</Link>
 
       {/* VERDICT SEAL */}
@@ -433,7 +356,11 @@ function Report({
           color: c.paper,
           position: "relative",
           overflow: "hidden",
-          animation: stamped ? "paStamp 320ms cubic-bezier(.2,.8,.25,1) both" : "none",
+          animation: stamped
+            ? certified
+              ? "paStamp 320ms cubic-bezier(.2,.8,.25,1) both, paCertGlow 1700ms ease-out 320ms both"
+              : "paStamp 320ms cubic-bezier(.2,.8,.25,1) both"
+            : "none",
         }}
       >
         <div style={{ position: "absolute", right: -10, top: -30, fontFamily: font.serif, fontSize: 230, lineHeight: 1, color: "rgba(255,255,255,.035)", fontWeight: 500, pointerEvents: "none" }}>
@@ -545,6 +472,9 @@ function Report({
         </div>
       </div>
 
+      {/* ASK THE LEDGER */}
+      <AskLedger id={id} />
+
       {/* ACTIONS */}
       <div style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 12 }}>
         <Link href={`/runs/${id}/diffs`} className="btn-dark" style={darkBtn}>
@@ -554,6 +484,119 @@ function Report({
           {certified ? "Both runs remain in the ledger." : "Re-run after applying the suggested fix."}
         </span>
       </div>
+    </div>
+  );
+}
+
+// ── Ask the ledger (NL → SQL copilot) ─────────────────────────────────────────
+type AskResult = { sql: string; rows: Record<string, unknown>[]; rowCount: number; answer: string };
+const SUGGESTED_Q = [
+  "Which field has the highest divergence rate?",
+  "Show the 5 largest deltas with their input principals",
+  "How many inputs diverged on final_amount?",
+];
+
+function AskLedger({ id }: { id: string }) {
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<AskResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async (question: string) => {
+    if (!question.trim() || busy) return;
+    setBusy(true);
+    setErr(null);
+    setRes(null);
+    try {
+      const r = await fetch(`/api/runs/${id}/ask`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error ?? "Query failed");
+      setRes(data);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Query failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cols = res?.rows.length ? Object.keys(res.rows[0]) : [];
+
+  return (
+    <div style={{ marginTop: 34 }}>
+      <h2 style={{ fontWeight: 600, fontSize: 20, lineHeight: "28px", color: c.ink, margin: "0 0 4px" }}>Ask the ledger</h2>
+      <div style={{ fontFamily: font.mono, fontSize: 11.5, color: c.muted, marginBottom: 14, letterSpacing: ".02em" }}>
+        Natural language → read-only SQL over this run&apos;s evidence
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && run(q)}
+          placeholder="e.g. which inputs diverged the most?"
+          style={{ flex: 1, fontFamily: font.sans, fontSize: 14, color: c.ink, background: c.surface, border: `1px solid ${c.rule}`, borderRadius: 4, padding: "11px 14px", outline: "none" }}
+        />
+        <button className="btn-dark" style={{ ...darkBtn, opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }} disabled={busy} onClick={() => run(q)}>
+          {busy ? "Querying…" : "Ask"}
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>
+        {SUGGESTED_Q.map((s) => (
+          <button
+            key={s}
+            onClick={() => { setQ(s); run(s); }}
+            disabled={busy}
+            style={{ fontFamily: font.sans, fontSize: 12, color: c.instrument, background: "rgba(31,95,122,.07)", border: `1px solid rgba(31,95,122,.2)`, borderRadius: 4, padding: "5px 10px", cursor: busy ? "default" : "pointer" }}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {err && <div style={{ marginTop: 14, fontFamily: font.mono, fontSize: 12.5, color: c.divergent }}>{err}</div>}
+
+      {res && (
+        <div style={{ marginTop: 16, ...panel, padding: 0, overflow: "hidden" }}>
+          {res.answer && (
+            <div style={{ padding: "16px 20px", borderBottom: `1px solid ${c.divider}`, fontSize: 14.5, lineHeight: "22px", color: c.ink }}>
+              {res.answer}
+            </div>
+          )}
+          <details style={{ borderBottom: `1px solid ${c.divider}` }}>
+            <summary style={{ padding: "10px 20px", fontFamily: font.mono, fontSize: 11.5, color: c.instrument, cursor: "pointer" }}>
+              SQL · {res.rowCount} row{res.rowCount !== 1 ? "s" : ""}
+            </summary>
+            <pre style={{ margin: 0, padding: "0 20px 16px", fontFamily: font.mono, fontSize: 12, lineHeight: "19px", color: c.muted, whiteSpace: "pre-wrap" }}>{res.sql}</pre>
+          </details>
+          {res.rows.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: font.mono, fontSize: 12.5 }}>
+                <thead>
+                  <tr>
+                    {cols.map((col) => (
+                      <th key={col} style={{ textAlign: "left", padding: "9px 20px", color: c.muted, fontWeight: 600, borderBottom: `1px solid ${c.rule}`, background: c.raised, whiteSpace: "nowrap" }}>{col}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {res.rows.slice(0, 50).map((row, i) => (
+                    <tr key={i}>
+                      {cols.map((col) => (
+                        <td key={col} style={{ padding: "8px 20px", color: c.ink, borderBottom: `1px solid ${c.divider}`, whiteSpace: "nowrap" }}>{String(row[col] ?? "")}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -586,7 +629,7 @@ function FindingsSection({
         const severityColor = f.severity === "high" ? c.divergent : f.severity === "medium" ? c.amber : c.muted;
         const severityBg = f.severity === "high" ? "rgba(179,38,30,.05)" : f.severity === "medium" ? "rgba(178,107,0,.05)" : "transparent";
         const severityBd = f.severity === "high" ? "rgba(179,38,30,.4)" : f.severity === "medium" ? "rgba(178,107,0,.4)" : c.rule;
-        const fixText = f.suggested_fix ?? suggestedFix;
+        const fixText = f.suggested_fix;
 
         return (
           <div key={f.id} style={{ marginTop: 14, ...panel }}>
@@ -631,55 +674,81 @@ function FindingsSection({
               </div>
             )}
 
-            {/* provenance */}
-            <div style={{ padding: "18px 24px", borderBottom: `1px solid ${c.divider}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: c.instrument }} />
-                <span style={{ fontWeight: 600, fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: c.instrument }}>How it was found</span>
-                <span style={{ fontSize: 12, color: c.muted2 }}>· agent investigation</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                <ProvChip text="Hypothesis · half-cent rounding" />
-                <Arrow />
-                <ProvChip text="Probed 200 boundary inputs" />
-                <Arrow />
-                <ProvChip text="Oracle ruled divergence" danger />
-                <Arrow />
-                <ProvChip text="Narrowed to half-cent ties" />
-                <Arrow />
-                <ProvChip text="Isolated trigger" />
-              </div>
-              <div style={{ fontSize: 12.5, color: c.muted, marginTop: 11 }}>
-                The metrics above are the oracle&apos;s mechanical record; this trace is the agent&apos;s path to the field.{" "}
-                <span style={{ color: c.instrument, cursor: "pointer", fontWeight: 500 }} onClick={() => router.push(`/runs/${id}?running=1`)}>
-                  See full investigation →
-                </span>
-              </div>
-            </div>
-
             {/* cause + fix */}
             <div style={{ padding: "20px 24px" }}>
               <div style={kicker}>Likely cause</div>
               <p style={{ fontSize: 14.5, lineHeight: "23px", color: c.inkSoft, margin: "0 0 18px", whiteSpace: "pre-wrap" }}>
                 {f.explanation ?? "LLM explanation not available for this finding."}
               </p>
-              <div style={kicker}>Suggested fix</div>
-              <div style={{ background: c.ink, borderRadius: 6, padding: "16px 18px", position: "relative" }}>
-                <button
-                  onClick={() => copy(fixText)}
-                  style={{ position: "absolute", top: 12, right: 12, fontFamily: font.mono, fontSize: 11, color: c.sealMuted, background: c.inkSoft, border: `1px solid ${c.sealRule}`, borderRadius: 4, padding: "4px 9px", cursor: "pointer" }}
-                >
-                  {copied ? "copied" : "copy"}
-                </button>
-                <pre style={{ margin: 0, fontFamily: font.mono, fontSize: 13, lineHeight: "22px", color: "#D7DDE5", whiteSpace: "pre", overflow: "auto" }}>
-                  {fixText}
-                </pre>
-              </div>
+              {fixText && (
+                <>
+                  <div style={kicker}>Suggested fix</div>
+                  <div style={{ background: c.ink, borderRadius: 6, padding: "16px 18px", position: "relative" }}>
+                    <button
+                      onClick={() => copy(fixText)}
+                      style={{ position: "absolute", top: 12, right: 12, fontFamily: font.mono, fontSize: 11, color: c.sealMuted, background: c.inkSoft, border: `1px solid ${c.sealRule}`, borderRadius: 4, padding: "4px 9px", cursor: "pointer" }}
+                    >
+                      {copied ? "copied" : "copy"}
+                    </button>
+                    <pre style={{ margin: 0, fontFamily: font.mono, fontSize: 13, lineHeight: "22px", color: "#D7DDE5", whiteSpace: "pre", overflow: "auto" }}>
+                      {fixText}
+                    </pre>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         );
       })}
+      <ReVerifyPanel id={id} router={router} />
     </>
+  );
+}
+
+// ── Re-verify (apply a fix, prove it) ─────────────────────────────────────────
+function ReVerifyPanel({ id, router }: { id: string; router: ReturnType<typeof useRouter> }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const fd = new FormData();
+      fd.append("migratedFiles", file);
+      const res = await fetch(`/api/runs/${id}/reverify`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Re-verify failed");
+      router.push(`/runs/${data.runId}`);
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Re-verify failed");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 28, background: c.surface, border: `1px solid ${c.rule}`, borderLeft: `3px solid ${c.instrument}`, borderRadius: 6, padding: "20px 24px", boxShadow: "0 1px 3px rgba(15,26,42,.06)" }}>
+      <div style={{ fontWeight: 600, fontSize: 15, color: c.ink }}>Apply a fix and re-verify</div>
+      <div style={{ fontSize: 13.5, lineHeight: "21px", color: c.muted, marginTop: 6, maxWidth: 620 }}>
+        Upload a corrected migrated program. Parity re-runs the same oracle over the same input
+        contract and issues a fresh verdict — the drift chart records the recovery.
+      </div>
+      <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          className="btn-dark"
+          style={{ ...darkBtn, opacity: busy ? 0.6 : 1, cursor: busy ? "default" : "pointer" }}
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+        >
+          {busy ? "Re-verifying…" : "Upload fix & re-verify"}
+        </button>
+        <input ref={fileRef} type="file" accept=".py" onChange={onFile} style={{ display: "none" }} />
+        {err && <span style={{ fontFamily: font.mono, fontSize: 12.5, color: c.divergent }}>{err}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -735,14 +804,6 @@ function DriftChart({ runs }: { runs: ProjectRun[] }) {
 }
 
 // ── Small reusable pieces ─────────────────────────────────────────────────────
-function Counter({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-      <span style={{ fontSize: 12.5, color: c.inkSoft }}>{label}</span>
-      <span style={{ fontFamily: font.mono, fontSize: 15, color: c.ink }}>{value}</span>
-    </div>
-  );
-}
 function CertifiedNote() {
   return (
     <div style={{ marginTop: 28, background: c.surface, border: `1px solid ${c.rule}`, borderLeft: `3px solid ${c.verified}`, borderRadius: 6, padding: "20px 24px", boxShadow: "0 1px 3px rgba(15,26,42,.06)", display: "flex", alignItems: "center", gap: 16 }}>
@@ -754,16 +815,6 @@ function CertifiedNote() {
         <div style={{ fontSize: 13.5, color: c.muted, marginTop: 2 }}>All fields matched the oracle across every input. Evidence remains inspectable so the pass is still auditable.</div>
       </div>
     </div>
-  );
-}
-function Arrow() {
-  return <span style={{ color: c.muted2, fontFamily: font.mono, fontSize: 12 }}>→</span>;
-}
-function ProvChip({ text, danger }: { text: string; danger?: boolean }) {
-  return (
-    <span style={{ fontFamily: font.mono, fontSize: 11.5, color: danger ? c.divergent : c.instrument, background: danger ? "rgba(179,38,30,.06)" : "rgba(31,95,122,.08)", border: `1px solid ${danger ? "rgba(179,38,30,.25)" : "rgba(31,95,122,.2)"}`, borderRadius: 4, padding: "5px 10px" }}>
-      {text}
-    </span>
   );
 }
 function Metric({ label, main, sub }: { label: string; main: string; sub?: string }) {

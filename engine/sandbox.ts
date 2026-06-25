@@ -46,7 +46,10 @@ export async function createSandboxFromDir(
 
 // GnuCOBOL needs COB_CONFIG_DIR etc. and its DLL bin in PATH.
 // These are set as user env vars but may not be in the current session's process.env yet.
+// Windows-only: on macOS/Linux a Homebrew/apt cobc resolves its own config; the Windows
+// chocolatey paths below would otherwise poison the child env and break compilation.
 function cobEnv(): Partial<NodeJS.ProcessEnv> {
+  if (process.platform !== 'win32') return {};
   const cobBase = 'C:\\ProgramData\\chocolatey\\lib\\gnucobol\\tools';
   const python  = 'C:\\Users\\tyler\\AppData\\Local\\Programs\\Python\\Python313';
   const extra = [cobBase + '\\bin', python].filter(
@@ -61,39 +64,127 @@ function cobEnv(): Partial<NodeJS.ProcessEnv> {
   };
 }
 
+// ── Sandbox resource limits (uploaded code is untrusted) ──────────────────────
+const LIMITS = {
+  virtualMemKB: 2 * 1024 * 1024, // 2 GB address space
+  cpuSeconds: 60,                // CPU time (wall-time is enforced separately)
+  fileSizeKB: 512 * 1024,        // 512 MB max single output file
+  maxProcs: 256,                 // fork-bomb guard
+};
+const MAX_OUTPUT_BYTES = 32 * 1024 * 1024; // cap captured stdout/stderr (output-flood guard)
+
+// Minimal environment for untrusted children. NEVER forward the worker's secrets
+// (DATABASE_URL, OPENAI_API_KEY, AWS_*, VERCEL_*) — only what cobc/python need to run.
+function childEnv(): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME ?? '/tmp',
+    LANG: process.env.LANG ?? 'C.UTF-8',
+    TMPDIR: process.env.TMPDIR,
+    ...cobEnv(),
+  } as NodeJS.ProcessEnv;
+}
+
+function shellQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+// cmd.exe does not understand POSIX single-quotes (`'cobc'` becomes an unknown
+// command). Leave plain tokens untouched; only double-quote args with spaces or
+// cmd-special chars, doubling any embedded quote.
+function cmdQuote(arg: string): string {
+  if (/^[A-Za-z0-9_.:\\/=+-]+$/.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '""')}"`;
+}
+
+// POSIX: apply ulimits in the same shell before exec'ing the command. Optionally
+// drop network via `unshare -n` when PARITY_SANDBOX_UNSHARE=1 and it is available.
+function buildPosixCommand(rawCmd: string): string {
+  const limits =
+    `ulimit -v ${LIMITS.virtualMemKB} 2>/dev/null; ` +
+    `ulimit -t ${LIMITS.cpuSeconds} 2>/dev/null; ` +
+    `ulimit -f ${LIMITS.fileSizeKB} 2>/dev/null; ` +
+    `ulimit -u ${LIMITS.maxProcs} 2>/dev/null; `;
+  const inner = process.env.PARITY_SANDBOX_UNSHARE === '1' ? `unshare -n -- sh -c ${shellQuote(rawCmd)}` : rawCmd;
+  return `${limits}${inner}`;
+}
+
+function execHardened(dir: string, rawCmd: string, timeoutMs: number): Promise<CommandResult> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const isWindows = process.platform === 'win32';
+    const argv: [string, string[]] = isWindows
+      ? ['cmd', ['/c', rawCmd]]
+      : ['sh', ['-c', buildPosixCommand(rawCmd)]];
+
+    const child = spawn(argv[0], argv[1], {
+      cwd: dir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: childEnv(),
+      detached: !isWindows, // own process group so we can SIGKILL grandchildren (cobcrun/python)
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let killed: string | null = null;
+
+    const killTree = (reason: string) => {
+      if (killed) return;
+      killed = reason;
+      try {
+        if (!isWindows && child.pid) process.kill(-child.pid, 'SIGKILL');
+        else child.kill('SIGKILL');
+      } catch { /* already gone */ }
+    };
+
+    const timer = setTimeout(() => killTree(`wall-time limit ${timeoutMs}ms exceeded`), timeoutMs);
+
+    const onData = (which: 'out' | 'err') => (d: Buffer) => {
+      if (which === 'out') stdout += d.toString(); else stderr += d.toString();
+      if (stdout.length + stderr.length > MAX_OUTPUT_BYTES) killTree('output limit exceeded');
+    };
+    child.stdout.on('data', onData('out'));
+    child.stderr.on('data', onData('err'));
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (killed) stderr += `\n[sandbox] terminated: ${killed}`;
+      resolve({ stdout, stderr, exitCode: killed ? 137 : code, execMs: Date.now() - start });
+    });
+    child.on('error', (err) => { clearTimeout(timer); reject(err); });
+  });
+}
+
+// Trusted internal invocation by argv (e.g. our own `cobc` compile). Still runs
+// under the same resource limits + scrubbed env on POSIX.
 export function runCommand(
   dir: string,
   cmd: string[],
   timeoutMs = 120_000
 ): Promise<CommandResult> {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const child = spawn(cmd[0], cmd.slice(1), {
-      cwd: dir,
-      timeout: timeoutMs,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...cobEnv() },
-    });
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-    child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-
-    child.on('close', (code) => {
-      resolve({ stdout, stderr, exitCode: code, execMs: Date.now() - start });
-    });
-    child.on('error', reject);
-  });
+  const quote = process.platform === 'win32' ? cmdQuote : shellQuote;
+  const rawCmd = cmd.map(quote).join(' ');
+  return execHardened(dir, rawCmd, timeoutMs);
 }
 
-// Run a user-supplied shell command string (may contain &&, pipes, etc.)
+// User commands are written POSIX-style (`./legacy`, `python3 …`) but on Windows
+// they run through cmd.exe, where `./legacy` errors with `'.' is not recognized`
+// and `python3` does not exist. Translate the common idioms so a contract saved
+// on any platform runs here. Leaves the command untouched on POSIX.
+function normalizeForWindows(cmd: string): string {
+  if (process.platform !== 'win32') return cmd;
+  return cmd
+    // strip a leading ./ or .\ on any token (cmd searches the cwd already)
+    .replace(/(^|[\s&|(])\.[\\/](?=\S)/g, '$1')
+    // python3 → python (only as a standalone command token)
+    .replace(/(^|[\s&|(])python3(?=\s|$)/g, '$1python');
+}
+
+// Run a user-supplied shell command string (may contain &&, pipes, etc.) — untrusted.
 export function runShellCommand(
   dir: string,
   cmd: string,
   timeoutMs = 120_000
 ): Promise<CommandResult> {
-  const isWindows = process.platform === 'win32';
-  const [shell, flag] = isWindows ? ['cmd', '/c'] : ['sh', '-c'];
-  return runCommand(dir, [shell, flag, cmd], timeoutMs);
+  return execHardened(dir, normalizeForWindows(cmd), timeoutMs);
 }

@@ -16,6 +16,22 @@ body {
 @keyframes paRise  { 0% { opacity: 0; transform: translateY(7px); } 100% { opacity: 1; transform: translateY(0); } }
 @keyframes paPulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
+/* CERTIFIED celebration — one orchestrated moment, on-brand greens */
+@keyframes paConfetti {
+  0%   { opacity: 0; transform: translate3d(0, -24px, 0) rotate(0deg); }
+  8%   { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--x, 0), 88vh, 0) rotate(var(--r, 540deg)); }
+}
+@keyframes paCertGlow {
+  0%   { box-shadow: 0 10px 34px rgba(15,26,42,.24), 0 0 0 0 rgba(47,162,119,0); }
+  30%  { box-shadow: 0 10px 34px rgba(15,26,42,.24), 0 0 0 6px rgba(47,162,119,.20); }
+  100% { box-shadow: 0 10px 34px rgba(15,26,42,.24), 0 0 0 0 rgba(47,162,119,0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pa-confetti-layer { display: none !important; }
+}
+
 /* hover states (dc comp used style-hover) */
 .btn-dark { transition: background .14s ease; }
 .btn-dark:hover { background: #1C2A3D !important; }

@@ -1,72 +1,66 @@
-# Parity — Next Session Notes
+# Parity — To-Do / Future Work
 
-## Where we left off
-
-**Branch:** `feature/backend`  
-**Last completed:** M4 — all API routes live and verified against Aurora.
-
-### Done this session
-- **M3 complete:** `engine/explain.ts`, `engine/pipeline.ts` (certify), `engine/worker.ts` all written and validated end-to-end. Pipeline runs `npm run pipeline:demo` → 10,050 inputs → COBOL compiles → Python runs → 2 findings → NOT_CERTIFIED verdict → LLM explanations stored. Deterministic every run.
-- **M4 complete:** 11 API routes created under `app/api/`, TypeScript clean, all smoke-tested against live Aurora data:
-  - `POST /api/projects` + `POST /api/projects/demo`
-  - `POST /api/runs`, `GET /api/runs/[id]`
-  - `GET /api/runs/[id]/findings`, `/diffs`, `/coverage`, `/certification`, `/agent`
-  - `POST /api/runs/[id]/ask` (501 stub — M5)
-  - `GET /api/projects/[id]/runs`
-
-### Key fixes made
-- `lib/db.ts` — only uses Aurora IAM/OIDC path when `process.env.VERCEL` is set; falls through to `DATABASE_URL` (Neon) for local dev.
-- `engine/explain.ts` — switched from Anthropic SDK to OpenAI (`gpt-4o-mini`). Uses `OPENAI_API_KEY`.
+Status as of 2026-06-24. Backend + frontend complete and wired to a live ledger.
+Running locally via docker compose (app + worker + postgres). Demo flow works
+end-to-end: NOT_CERTIFIED demo, re-verify → CERTIFIED, ledger copilot, live progress.
 
 ---
 
-## Next milestone: M5 — Wire frontend to live data
-
-Replace all `lib/mock.ts` imports in the page files with real `fetch()` calls to the API routes above.
-
-### Files to update
-
-**`app/projects/page.tsx`**
-- Currently reads from `projects` in `lib/mock.ts`
-- Replace with: `fetch('/api/projects')` → map rows to the same shape the component expects
-- Fields needed: `id`, `name`, `source_language`, `target_language`, `run_id`, `verdict`, `avg_divergence_rate`, `completed_at`
-- Make it a server component (no `"use client"`) — just `async function Dashboard()`
-
-**`app/runs/[id]/page.tsx`**
-- Currently reads from `runMeta`, `fieldBars`, `spineRows`, `trajectory`, `suggestedFix` in `lib/mock.ts`
-- The page is already `"use client"` with a polling pattern — keep that
-- Poll `GET /api/runs/[id]` every 2s while `status === 'running'` or `status === 'queued'`; stop when `completed` or `failed`
-- On completion, fetch `GET /api/runs/[id]/findings`, `/coverage`, `/certification`, `/projects/[projectId]/runs`
-- Wire the verdict seal, stats band, findings list, and drift chart to real data
-- The analytics section ("Computed live from the Aurora ledger") should use `/coverage` for the bar chart and `/projects/[id]/runs` for the drift line
-
-**`app/runs/[id]/diffs/page.tsx`**
-- Currently reads from mock
-- Replace with `fetch('/api/runs/[id]/diffs?field=X&onlyMismatches=true&limit=50&offset=0')`
-- Keep the field filter and onlyMismatches toggle wired to query params
-
-**`app/verify/new/page.tsx`**
-- The "Use demo" button should `POST /api/projects/demo` then `POST /api/runs` with the returned `projectId`
-- On success, redirect to `/runs/[runId]?running=1`
-- Start `npm run worker` in a separate terminal before clicking Run so the queued run gets picked up
-
-### Running the full demo flow
-1. `npm run dev` — Next.js frontend
-2. `npm run worker` — verification worker (separate terminal)
-3. Open `/verify/new` → click "Use demo" → redirects to run page → watch it go live
-
-### After M5 — M6: Deploy (required to qualify)
-- Push to Vercel (`vercel --prod`)
-- Worker runs locally for the demo (or containerize for Fargate)
-- Needs `DATABASE_URL` + `OPENAI_API_KEY` in Vercel env vars
-- Submission assets: ≤3-min demo video, architecture diagram, Aurora screenshot, Vercel URL + Team ID
+## ✅ Done this session
+- **Cross-platform fixes** — sandbox cobc paths win32-only; SSL off for local/docker postgres; POSIX upload commands (`./legacy`, `python3`).
+- **Docker** — `docker compose up` runs app + worker + postgres; migration + demo verified.
+- **Removed all placeholder/mock data** — deleted `lib/mock.ts`, the fabricated investigation theater, the fake provenance trace, and mock fallbacks. UI is 100% live ledger.
+- **#1 Re-verify arc** — `POST /api/runs/[id]/reverify` + `ReVerifyPanel`; upload a fix → fresh CERTIFIED run + confetti; drift chart shows recovery.
+- **#2 Ledger copilot** — `POST /api/runs/[id]/ask`, NL→SQL→answer. Safety: denylist + single-statement + forced LIMIT + read-only transaction with timeout. `AskLedger` UI.
+- **#3 Live pipeline progress** — `verification_runs.stage` column; worker stamps each phase; `WaitingView` real checklist.
+- **#4 Sandbox hardening** — scrubbed env (no secret leak), ulimits (mem/CPU/filesize/procs), output cap, SIGKILL process group, opt-in `unshare -n`.
+- **CERTIFIED celebration** — ribbon confetti + seal glow, reduced-motion safe.
+- **DB unification** — `lib/db.ts` + `scripts/migrate.ts` prefer `DATABASE_URL` so app + worker share ONE cluster (Aurora in prod); IAM/OIDC is fallback.
+- **`ARCHITECTURE.md`** — mermaid diagram + DB wiring + pipeline/sandbox/copilot docs (submission asset).
 
 ---
 
-## Env vars in `.env.local`
-- `DATABASE_URL` — Neon (used for local dev)
-- `OPENAI_API_KEY` — for LLM explain stage (gpt-4o-mini)
-- `PGHOST` / `AWS_ROLE_ARN` / `VERCEL_OIDC_TOKEN` — Aurora IAM auth (only active when `VERCEL=1`)
+## 🔴 Hackathon submission — critical path (deadline Jun 29, 5pm PT)
+- [ ] **Aurora connection** — get `aws-apg-cerulean-feather` URL (password user or fresh IAM). Set `DATABASE_URL=postgresql://…rds.amazonaws.com:5432/<db>?sslmode=require` on **both** Vercel env and the worker.
+- [ ] **Migrate Aurora** — `npm run db:migrate` against the Aurora `DATABASE_URL`.
+- [ ] **One real demo run on Aurora** → **AWS console screenshot** (required submission asset).
+- [ ] **Deploy to Vercel** — `vercel --prod`; confirm it reads live Aurora; capture the public URL + Team ID (`team_cv3eK9a0CMgLSlNGOGgN7tj0`).
+- [ ] **AWS credits request — by Jun 26, 12pm PT** (hard sub-deadline).
+- [ ] **<3-min demo video** — problem, audience, working app footage, which AWS DB + how it's used.
+- [ ] **Text writeup** — features + "Aurora PostgreSQL" + track = Monetizable B2B App.
+- [ ] (bonus) Build blog/video with #H0Hackathon — up to +0.6.
 
-## Useful run IDs (already in Aurora)
-- Completed demo run: `295766e3-694e-4edd-b000-90ad9d5198ae` — NOT_CERTIFIED, 2 findings
+## 🟠 Product hardening (do if time before deadline)
+- [ ] **#5 Decouple upload filenames** — upload command hardcodes `legacy.cbl`/`migrated.py`; derive from uploaded filename or detect entry file. Silent failure for real users otherwise.
+- [ ] **#6 Determinism test** — automated: demo run → always NOT_CERTIFIED, ~100 `final_amount` divergences. Pin an exact count via boundary cases (currently drifts 99–111).
+- [ ] **Re-verify forks instead of mutates** — re-verifying the demo project mutates it (stays "fixed"); fork to a new project so demos repeat without manual reset.
+- [ ] **Clean up stale broken projects** — old `COBOL → Python Migration` rows carry POSIX-broken `&& legacy` commands; they fail if clicked.
+
+## 🟡 Future work (post-hackathon)
+- [ ] **Deploy worker to Fargate** — currently local; containerize per `Dockerfile.worker` for always-on.
+- [ ] **Network isolation by default** — make `unshare -n` (or a locked-down network namespace) the default once the worker host grants the capability.
+- [ ] **Richer SQL analytics** — divergence heatmap, severity-trend window functions beyond the drift line.
+- [ ] **Function-level + HTTP-service comparison contracts** — v1 is black-box CSV only.
+- [ ] **Multi-file / multi-module migrations** — current demo is single legacy + single migrated.
+- [ ] **Auth + multi-tenant projects** — no auth today.
+- [ ] **Streaming explain** — per-finding LLM explanation streamed to UI as it completes.
+- [ ] **Configurable input generators** — beyond the interest/payroll schema.
+
+---
+
+## Run it
+```
+docker compose --env-file <env-with-keys> up -d --build   # app + worker + postgres
+# migrate (host → docker db):
+DATABASE_URL='postgres://parity:parity@localhost:5432/parity' npx tsx scripts/migrate.ts
+```
+Open http://localhost:3000 → /verify/new → "Use demo".
+Reset demo to pristine NOT_CERTIFIED:
+```
+docker exec parity-db-1 psql -U parity -d parity \
+  -c "UPDATE projects SET upload_dir=NULL, comparison_contract=NULL WHERE name='COBOL Interest & Payroll';"
+```
+
+## Notes
+- Engine edits (`engine/*`, `lib/*` used by worker) need `docker compose up -d --build worker`. App/UI edits are live via mount.
+- Env: `DATABASE_URL` (unified), `OPENAI_API_KEY` (explain + copilot). `.env.local` markdown fence + expired OIDC token already cleaned; backup at `.env.local.bak`.
