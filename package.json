@@ -9,7 +9,8 @@
     "lint": "next lint",
     "db:migrate": "dotenv -e .env.local -- npx tsx scripts/migrate.ts",
     "pipeline:demo": "dotenv -e .env.local -- npx tsx engine/cli.ts",
-    "worker": "dotenv -e .env.local -- npx tsx engine/worker.ts"
+    "worker": "dotenv -e .env.local -- npx tsx engine/worker.ts",
+    "test": "npx tsx scripts/test-determinism.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.105.0",

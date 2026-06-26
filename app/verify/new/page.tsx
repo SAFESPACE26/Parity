@@ -20,6 +20,30 @@ export default function NewVerification() {
   const [outputFields, setOutputFields] = useState("final_amount,net_pay");
   const [legacyCmd, setLegacyCmd] = useState("cobc -x -free -o legacy legacy.cbl && ./legacy");
   const [migratedCmd, setMigratedCmd] = useState("python3 migrated.py inputs.csv migrated_outputs.csv");
+  // Once the reviewer hand-edits a command we stop overwriting it from filenames.
+  const [legacyCmdEdited, setLegacyCmdEdited] = useState(false);
+  const [migratedCmdEdited, setMigratedCmdEdited] = useState(false);
+
+  // Build run commands from the actual uploaded entry files so an upload named
+  // anything (not just legacy.cbl / migrated.py) runs without manual edits.
+  const pick = (files: File[], ...exts: string[]) =>
+    files.find((f) => exts.some((e) => f.name.toLowerCase().endsWith(e)))?.name ?? files[0]?.name;
+  const deriveLegacyCmd = (files: File[]) => {
+    const src = pick(files, ".cbl", ".cob");
+    return src ? `cobc -x -free -o legacy ${src} && ./legacy` : legacyCmd;
+  };
+  const deriveMigratedCmd = (files: File[]) => {
+    const src = pick(files, ".py");
+    return src ? `python3 ${src} inputs.csv migrated_outputs.csv` : migratedCmd;
+  };
+  const onLegacyFiles = (files: File[]) => {
+    setLegacy((s) => ({ ...s, files }));
+    if (!legacyCmdEdited && files.length) setLegacyCmd(deriveLegacyCmd(files));
+  };
+  const onMigratedFiles = (files: File[]) => {
+    setMigrated((s) => ({ ...s, files }));
+    if (!migratedCmdEdited && files.length) setMigratedCmd(deriveMigratedCmd(files));
+  };
 
   const bothUploaded = legacy.files.length > 0 && migrated.files.length > 0;
 
@@ -130,7 +154,7 @@ export default function NewVerification() {
             ext=".cbl / .pli · or .zip"
             langs={["COBOL", "PL/I", "FORTRAN", "RPG"]}
             slot={legacy}
-            onFiles={(files) => setLegacy((s) => ({ ...s, files }))}
+            onFiles={onLegacyFiles}
             onLang={(lang) => setLegacy((s) => ({ ...s, lang }))}
           />
           <UploadSlot
@@ -138,7 +162,7 @@ export default function NewVerification() {
             ext=".py / .java / .go · or .zip"
             langs={["Python", "Java", "Go", "C#", "TypeScript"]}
             slot={migrated}
-            onFiles={(files) => setMigrated((s) => ({ ...s, files }))}
+            onFiles={onMigratedFiles}
             onLang={(lang) => setMigrated((s) => ({ ...s, lang }))}
           />
         </div>
@@ -170,10 +194,10 @@ export default function NewVerification() {
               <input value={outputFields} onChange={(e) => setOutputFields(e.target.value)} style={input} />
             </Field>
             <Field label="Legacy run command" hint="Executed inside the legacy sandbox.">
-              <input value={legacyCmd} onChange={(e) => setLegacyCmd(e.target.value)} style={input} />
+              <input value={legacyCmd} onChange={(e) => { setLegacyCmd(e.target.value); setLegacyCmdEdited(true); }} style={input} />
             </Field>
             <Field label="Migrated run command" hint="Executed inside the migrated sandbox.">
-              <input value={migratedCmd} onChange={(e) => setMigratedCmd(e.target.value)} style={input} />
+              <input value={migratedCmd} onChange={(e) => { setMigratedCmd(e.target.value); setMigratedCmdEdited(true); }} style={input} />
             </Field>
           </div>
         </div>

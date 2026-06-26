@@ -32,3 +32,12 @@ support.js
 
 # uploaded user code
 /uploads
+
+# submission writeup (LaTeX source + build artifacts)
+SUBMISSION.tex
+*.aux
+*.log
+*.out
+*.pdf
+*.toc
+*.synctex.gz

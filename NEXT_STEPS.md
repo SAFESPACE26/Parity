@@ -21,20 +21,22 @@ end-to-end: NOT_CERTIFIED demo, re-verify → CERTIFIED, ledger copilot, live pr
 ---
 
 ## 🔴 Hackathon submission — critical path (deadline Jun 29, 5pm PT)
-- [ ] **Aurora connection** — get `aws-apg-cerulean-feather` URL (password user or fresh IAM). Set `DATABASE_URL=postgresql://…rds.amazonaws.com:5432/<db>?sslmode=require` on **both** Vercel env and the worker.
-- [ ] **Migrate Aurora** — `npm run db:migrate` against the Aurora `DATABASE_URL`.
-- [ ] **One real demo run on Aurora** → **AWS console screenshot** (required submission asset).
-- [ ] **Deploy to Vercel** — `vercel --prod`; confirm it reads live Aurora; capture the public URL + Team ID (`team_cv3eK9a0CMgLSlNGOGgN7tj0`).
-- [ ] **AWS credits request — by Jun 26, 12pm PT** (hard sub-deadline).
+- [x] **Aurora connection** — `DB_TARGET=aurora` IAM path (PR #7); app + worker share one cluster.
+- [x] **Migrate Aurora** — `npm run db:migrate` ran against Aurora; `stage` column added (PR #7).
+- [x] **Real demo run on Aurora** — `pipeline:demo` → NOT_CERTIFIED, served via `npm run dev` (PR #7).
+- [x] **Text writeup** — `SUBMISSION.tex` (full project report). Plain-text Devpost copy also drafted.
+- [ ] **AWS console screenshot** — capture the Aurora cluster / a run in the RDS console (required asset).
+- [ ] **Deploy to Vercel** — currently **FAILING** (red check on PR #7). Fix env (refresh OIDC token or set `DB_TARGET=aurora` + Aurora creds), redeploy, capture public URL + Team ID (`team_cv3eK9a0CMgLSlNGOGgN7tj0`). **Top blocker — no live URL = can't submit.**
+- [ ] **AWS credits request — by Jun 26, 12pm PT** (hard sub-deadline, imminent).
 - [ ] **<3-min demo video** — problem, audience, working app footage, which AWS DB + how it's used.
-- [ ] **Text writeup** — features + "Aurora PostgreSQL" + track = Monetizable B2B App.
+- [ ] **Paste writeup into Devpost** — from `SUBMISSION.tex`; set track = Monetizable B2B App, DB = Aurora PostgreSQL.
 - [ ] (bonus) Build blog/video with #H0Hackathon — up to +0.6.
 
-## 🟠 Product hardening (do if time before deadline)
-- [ ] **#5 Decouple upload filenames** — upload command hardcodes `legacy.cbl`/`migrated.py`; derive from uploaded filename or detect entry file. Silent failure for real users otherwise.
-- [ ] **#6 Determinism test** — automated: demo run → always NOT_CERTIFIED, ~100 `final_amount` divergences. Pin an exact count via boundary cases (currently drifts 99–111).
-- [ ] **Re-verify forks instead of mutates** — re-verifying the demo project mutates it (stays "fixed"); fork to a new project so demos repeat without manual reset.
-- [ ] **Clean up stale broken projects** — old `COBOL → Python Migration` rows carry POSIX-broken `&& legacy` commands; they fail if clicked.
+## 🟠 Product hardening
+- [x] **#5 Decouple upload filenames** — `verify/new` derives the run command from the actual uploaded entry file (`.cbl`/`.cob`, `.py`); manual edits are preserved. Validated: oddly-named files run end-to-end.
+- [x] **#6 Determinism test** — `npm test` (`scripts/test-determinism.ts`): demo run → asserts NOT_CERTIFIED, diverging count in band, finding on `final_amount`. Requires the stack running.
+- [ ] **Re-verify forks instead of mutates** — DEFERRED: forking would break the single-project drift-recovery chart (the demo's payoff). Current workaround: reset the demo project (see below).
+- [ ] **Clean up stale broken projects** — old `COBOL → Python Migration` rows carry POSIX-broken `&& legacy` commands; they fail if clicked (docker-local data; new uploads are correct).
 
 ## 🟡 Future work (post-hackathon)
 - [ ] **Deploy worker to Fargate** — currently local; containerize per `Dockerfile.worker` for always-on.
